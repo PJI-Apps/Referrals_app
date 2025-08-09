@@ -101,8 +101,6 @@ if uploaded is not None:
     source_col = st.selectbox("Column with **Referral Source**", cols, index=1 if len(cols) > 1 else 0)
     month_mode = st.radio("How do you want to set the **Month** for these rows?", ["Pick a month for all rows", "Use a column from the file"], horizontal=True)
 
-import calendar
-
 if month_mode == "Pick a month for all rows":
     # Month/year dropdowns instead of full calendar
     current = date.today()
