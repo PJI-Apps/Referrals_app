@@ -2,9 +2,26 @@ import io
 import os
 import pandas as pd
 import streamlit as st
-from datetime import datetime
+from datetime import date
 
-st.set_page_config(page_title="Referral Sources Tracker", layout="wide")
+def list_years(master_df):
+    if master_df.empty:
+        return []
+    return sorted({str(m)[:4] for m in master_df["month"].dropna()})
+
+def months_in_year(year, through_month=None):
+    """Return ['YYYY-01', ...] up to through_month (1–12). If None, full year."""
+    ym = []
+    last = through_month or 12
+    for mm in range(1, last + 1):
+        ym.append(f"{year}-{mm:02d}")
+    return ym
+
+st.set_page_config(
+    page_title="Referral Sources Tracker",
+    page_icon="assets/firm_logo.png",  # favicon/tab icon
+    layout="wide",
+)
 
 st.title("📈 Referral Sources Tracker")
 
@@ -56,6 +73,9 @@ with st.sidebar:
         save_master(pd.DataFrame(columns=["referred_person", "referral_source", "month"]))
         st.success("Master cleared.")
         master = load_master()
+
+st.sidebar.image("assets/firm_logo.png", use_container_width=True)
+st.sidebar.markdown("---")
 
 # --- File upload section ---
 st.header("1) Upload Monthly List")
@@ -111,70 +131,115 @@ if uploaded is not None:
 st.header("2) Explore & Download Results")
 master = load_master()
 
+# If no data at all
 if len(master) == 0:
     st.info("Upload at least one monthly file to see results.")
 else:
-    pivot = (
-        master
-        .groupby(["referral_source", "month"], dropna=False)
-        .size()
-        .reset_index(name="count")
-        .pivot(index="referral_source", columns="month", values="count")
-        .fillna(0)
-        .astype(int)
-        .sort_index()
-    )
+    # --- Year filter + YTD control (YTD = up to latest month WITH DATA) ---
+    years = list_years(master)
+    latest_year = years[-1] if years else None
 
-    if len(pivot.columns):
-        cols_sorted = sorted(pivot.columns, key=lambda s: (s is None, s))
-        pivot = pivot[cols_sorted]
+    col_y1, col_y2 = st.columns([2, 1])
+    with col_y1:
+        year_choice = st.selectbox("Select year", years, index=years.index(latest_year))
+    with col_y2:
+        use_ytd = st.checkbox("Use Year-to-Date (ends at latest month with data)", value=True)
 
-    st.subheader("Sorting")
-    months = ["(Alphabetical)"] + list(pivot.columns)
-    sort_choice = st.selectbox("Sort referral sources by:", months, index=0)
-    ascending = st.checkbox("Ascending", value=False)
+    # Build a filtered copy for the selected year
+    year_mask = master["month"].str.startswith(year_choice)
+    master_year = master[year_mask].copy()
 
-    if sort_choice == "(Alphabetical)":
-        pivot_view = pivot.sort_index(ascending=ascending)
+    # Determine YTD cutoff as the latest month that actually has data for the selected year
+    cutoff_month = None
+    if use_ytd:
+        months_for_year = (
+            master.loc[master["month"].str.startswith(year_choice), "month"]
+            .str[-2:].astype(int).sort_values()
+        )
+        cutoff_month = int(months_for_year.iloc[-1]) if len(months_for_year) else 12
+        # Apply cutoff
+        master_year = master_year[master_year["month"].str[-2:].astype(int) <= cutoff_month]
+
+    if master_year.empty:
+        st.info("No data for the selected year/period yet.")
     else:
-        pivot_view = pivot.sort_values(by=sort_choice, ascending=ascending)
-
-    st.subheader("Referral Counts by Source × Month")
-    st.dataframe(pivot_view, use_container_width=True)
-
-    totals = pd.DataFrame([pivot_view.sum(axis=0)], index=["TOTALS"])
-    st.write("**Monthly totals across all sources:**")
-    st.dataframe(totals, use_container_width=True)
-
-    def to_excel_bytes(pivot_df, master_df):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-            pivot_df.to_excel(writer, sheet_name="Pivot")
-            master_df.to_excel(writer, sheet_name="Master", index=False)
-        return output.getvalue()
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.download_button(
-            "⬇️ Download Pivot (CSV)",
-            data=pivot_view.to_csv().encode("utf-8"),
-            file_name="referral_pivot.csv",
-            mime="text/csv"
+        # Build pivot for selected year/period
+        pivot = (
+            master_year
+            .groupby(["referral_source", "month"], dropna=False)
+            .size()
+            .reset_index(name="count")
+            .pivot(index="referral_source", columns="month", values="count")
+            .fillna(0)
+            .astype(int)
+            .sort_index()
         )
-    with col2:
-        st.download_button(
-            "⬇️ Download Master (CSV)",
-            data=master.to_csv(index=False).encode("utf-8"),
-            file_name="referrals_master.csv",
-            mime="text/csv"
-        )
-    with col3:
-        excel_bytes = to_excel_bytes(pivot_view, master)
-        st.download_button(
-            "⬇️ Download Excel (Pivot+Master)",
-            data=excel_bytes,
-            file_name="referrals_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+
+        # Ensure columns cover every month in the visible period (zero-fill missing months)
+        full_months = months_in_year(year_choice, cutoff_month)
+        for m in full_months:
+            if m not in pivot.columns:
+                pivot[m] = 0
+        pivot = pivot[full_months]  # order Jan..(cutoff)
+
+        # Sorting
+        st.subheader("Sorting")
+        months = ["(Alphabetical)"] + list(pivot.columns)
+        sort_choice = st.selectbox("Sort referral sources by:", months, index=0)
+        ascending = st.checkbox("Ascending", value=False)
+
+        if sort_choice == "(Alphabetical)":
+            pivot_view = pivot.sort_index(ascending=ascending)
+        else:
+            pivot_view = pivot.sort_values(by=sort_choice, ascending=ascending)
+
+        # Main table
+        title_suffix = f"{year_choice}{' (YTD)' if use_ytd else ''}"
+        st.subheader(f"Referral Counts by Source × Month — {title_suffix}")
+        st.dataframe(pivot_view, use_container_width=True)
+
+        # Monthly totals row
+        totals = pd.DataFrame([pivot_view.sum(axis=0)], index=["TOTALS"])
+        st.write("**Monthly totals across all sources:**")
+        st.dataframe(totals, use_container_width=True)
+
+        # NEW: Average per referral source across the shown months (includes zeros)
+        st.subheader(f"Average referrals per source — {title_suffix}")
+        avg_per_source = pivot[full_months].mean(axis=1).to_frame(name="avg_referrals_per_month")
+        avg_per_source_sorted = avg_per_source.sort_values("avg_referrals_per_month", ascending=False)
+        st.dataframe(avg_per_source_sorted, use_container_width=True)
+
+        # Downloads (filtered to current year/period)
+        def to_excel_bytes(pivot_df, master_df, averages_df):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                pivot_df.to_excel(writer, sheet_name="Pivot")
+                master_df.to_excel(writer, sheet_name="Master (filtered)", index=False)
+                averages_df.to_excel(writer, sheet_name="Averages", index=True)
+            return output.getvalue()
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.download_button(
+                "⬇️ Download Pivot (CSV)",
+                data=pivot_view.to_csv().encode("utf-8"),
+                file_name=f"referral_pivot_{year_choice}{'_YTD' if use_ytd else ''}.csv",
+                mime="text/csv"
+            )
+        with col2:
+            st.download_button(
+                "⬇️ Download Master (CSV)",
+                data=master_year.to_csv(index=False).encode("utf-8"),
+                file_name=f"referrals_master_{year_choice}{'_YTD' if use_ytd else ''}.csv",
+                mime="text/csv"
+            )
+        with col3:
+            excel_bytes = to_excel_bytes(pivot_view, master_year, avg_per_source_sorted)
+            st.download_button(
+                "⬇️ Download Excel (Pivot+Master+Averages)",
+                data=excel_bytes,
+                file_name=f"referrals_report_{year_choice}{'_YTD' if use_ytd else ''}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 st.caption("Tip: Deploy this on Streamlit Community Cloud to share with your team and update monthly.")
