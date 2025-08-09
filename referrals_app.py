@@ -2,7 +2,7 @@ import io
 import os
 import pandas as pd
 import streamlit as st
-from datetime import date
+from datetime import date, datetime
 
 def list_years(master_df):
     if master_df.empty:
@@ -101,8 +101,13 @@ if uploaded is not None:
     month_mode = st.radio("How do you want to set the **Month** for these rows?", ["Pick a month for all rows", "Use a column from the file"], horizontal=True)
 
     if month_mode == "Pick a month for all rows":
-        month_pick = st.date_input("Pick any date in the referral month")
-        chosen_month = pd.Timestamp(month_pick).strftime("%Y-%m") if month_pick else None
+    month_pick = st.date_input(
+        "Pick the month and year for this batch",
+        value=date.today().replace(day=1)
+    )
+    # Force to the first of the month and store as YYYY-MM
+    chosen_month = pd.to_datetime(month_pick).replace(day=1).strftime("%Y-%m")
+
     else:
         month_col = st.selectbox("Column containing the month/date", cols, index=2 if len(cols) > 2 else 0)
         tmp = data[month_col].head(10).apply(normalize_month)
