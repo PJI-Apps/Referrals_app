@@ -2,6 +2,7 @@ import io
 import os
 import pandas as pd
 import streamlit as st
+import calendar
 from datetime import date, datetime
 
 def list_years(master_df):
@@ -100,18 +101,33 @@ if uploaded is not None:
     source_col = st.selectbox("Column with **Referral Source**", cols, index=1 if len(cols) > 1 else 0)
     month_mode = st.radio("How do you want to set the **Month** for these rows?", ["Pick a month for all rows", "Use a column from the file"], horizontal=True)
 
+import calendar
+
     if month_mode == "Pick a month for all rows":
-        month_pick = st.date_input(
-            "Pick the month and year for this batch",
-            value=date.today().replace(day=1)
+        # Month/year dropdowns instead of full calendar
+        current = date.today()
+        year_options = list(range(current.year - 5, current.year + 2))
+
+        col_m, col_y = st.columns(2)
+        month_num = col_m.selectbox(
+            "Month",
+            list(range(1, 13)),
+            index=current.month - 1,
+            format_func=lambda m: calendar.month_name[m]
         )
-        # Force to the first of the month and store as YYYY-MM
-        chosen_month = pd.to_datetime(month_pick).replace(day=1).strftime("%Y-%m")
+        year_num = col_y.selectbox(
+            "Year",
+            year_options,
+            index=year_options.index(current.year)
+        )
+
+        chosen_month = f"{year_num}-{month_num:02d}"
 
     else:
         month_col = st.selectbox("Column containing the month/date", cols, index=2 if len(cols) > 2 else 0)
         tmp = data[month_col].head(10).apply(normalize_month)
         st.caption("Conversion preview (first 10 rows): " + ", ".join([str(x) for x in tmp.tolist()]))
+
 
     if st.button("➕ Append to Master"):
         df_new = pd.DataFrame({
