@@ -1,8 +1,0 @@
-# local files created when you run the app on your PC
-data/
-*.parquet
-*.csv
-*.xlsx
-.DS_Store
-.venv/
-.env
