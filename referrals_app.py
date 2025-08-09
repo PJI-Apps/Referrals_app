@@ -8,7 +8,7 @@ from datetime import date, datetime
 # =========================
 # 🔐 AUTHENTICATION (Gate)
 # =========================
-# Requires:
+# Configure via Streamlit Cloud → Settings → Secrets (TOML):
 # [credentials]
 #   [credentials.usernames.kelly]
 #   email = "kgraham@pjilaw.com"
@@ -16,14 +16,16 @@ from datetime import date, datetime
 #   password = "$2b$12$...."  # bcrypt hash
 #
 # [cookie]
-# expiry_days = 30
-# key = "LONG_RANDOM_STRING"
 # name = "referrals_app_cookie"
+# key  = "LONG_RANDOM_STRING_32+CHARS"
+# expiry_days = 30
 #
 # [preauthorized]
 # emails = ["kgraham@pjilaw.com"]
 
-st.set_page_config(page_title="Referral Sources Tracker", page_icon="assets/firm_logo.png", layout="wide")
+st.set_page_config(page_title="Referral Sources Tracker",
+                   page_icon="assets/firm_logo.png",
+                   layout="wide")
 
 try:
     import streamlit_authenticator as stauth
@@ -425,5 +427,3 @@ else:
                     st.stop()
         with col_d2:
             st.caption("Tip: narrow the list using filters, tick **Delete?**, then click the button.")
-
-st.caption("Tip: Deploy this on Streamlit Community Cloud to share with your team and update monthly.")
