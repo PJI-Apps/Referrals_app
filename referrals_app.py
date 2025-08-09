@@ -3,43 +3,46 @@ import os
 import calendar
 import pandas as pd
 import streamlit as st
+import yaml
+import streamlit_authenticator as stauth
 from datetime import date, datetime
 
 # =========================
-# 🔐 AUTHENTICATION (Gate)
+# 🔐 AUTHENTICATION (YAML in Secrets)
 # =========================
-# Configure via Streamlit Cloud → Settings → Secrets (TOML):
-# [credentials]
-#   [credentials.usernames.kelly]
-#   email = "kgraham@pjilaw.com"
-#   name = "Kelly Graham"
-#   password = "$2b$12$...."  # bcrypt hash
+# In Streamlit Cloud → Settings → Secrets (TOML) add:
 #
-# [cookie]
-# name = "referrals_app_cookie"
-# key  = "LONG_RANDOM_STRING_32+CHARS"
-# expiry_days = 30
+# [auth_config]
+# config = """
+# credentials:
+#   usernames:
+#     kelly:
+#       name: Kelly Graham
+#       email: kgraham@pjilaw.com
+#       password: "$2b$12$...."  # bcrypt hash
+# cookie:
+#   name: referrals_app_cookie
+#   key: "LONG_RANDOM_STRING_32+CHARS"
+#   expiry_days: 30
+# preauthorized:
+#   emails:
+#     - kgraham@pjilaw.com
+# """
 #
-# [preauthorized]
-# emails = ["kgraham@pjilaw.com"]
-
 st.set_page_config(page_title="Referral Sources Tracker",
                    page_icon="assets/firm_logo.png",
                    layout="wide")
 
+# Load config from secrets and gate the app
 try:
-    import streamlit_authenticator as stauth
-
-    credentials = st.secrets["credentials"]
-    cookie = st.secrets["cookie"]
-    preauth = st.secrets.get("preauthorized", {"emails": []})
+    config = yaml.safe_load(st.secrets["auth_config"]["config"])
 
     authenticator = stauth.Authenticate(
-        credentials,
-        cookie["name"],
-        cookie["key"],
-        cookie["expiry_days"],
-        preauth,
+        config["credentials"],
+        config["cookie"]["name"],
+        config["cookie"]["key"],
+        config["cookie"]["expiry_days"],
+        config.get("preauthorized", {}).get("emails", []),
     )
 
     name, auth_status, username = authenticator.login("Login", "main")
@@ -55,7 +58,7 @@ try:
             authenticator.logout("Logout", "sidebar")
             st.caption(f"Signed in as **{name}**")
 except Exception as e:
-    st.error("Authentication is not configured correctly. Check your app Secrets and requirements.")
+    st.error("Authentication is not configured correctly. Check your **Secrets**.")
     st.exception(e)
     st.stop()
 
@@ -203,7 +206,7 @@ if uploaded is not None:
     # --- Month selection (Month + Year dropdowns) ---
     if month_mode == "Pick a month for all rows":
         current = date.today()
-        year_options = list(range(current.year + 1, current.year - 6, -1))  # e.g., [next year .. current-5]
+        year_options = list(range(current.year + 1, current.year - 6, -1))  # [next year .. current-5]
         col_m, col_y = st.columns(2)
         month_num = col_m.selectbox(
             "Month",
@@ -416,11 +419,12 @@ else:
         col_d1, col_d2 = st.columns([1, 4])
         with col_d1:
             if st.button("🗑 Delete checked rows", type="secondary"):
+                to_delete_idx = edited.index[edited["Delete?"] is True]
+                # NOTE: Streamlit returns booleans; safer version:
                 to_delete_idx = edited.index[edited["Delete?"] == True]
                 if len(to_delete_idx) == 0:
                     st.warning("No rows were checked for deletion.")
                 else:
-                    # Drop by original index
                     master2 = master.drop(index=to_delete_idx, errors="ignore")
                     save_master(master2)
                     st.success(f"Deleted {len(to_delete_idx)} row(s).")
