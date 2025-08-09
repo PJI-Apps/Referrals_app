@@ -41,13 +41,29 @@ os.makedirs(DATA_DIR, exist_ok=True)
 def load_master():
     if os.path.exists(MASTER_PATH):
         try:
-            return pd.read_csv(MASTER_PATH)
+            df = pd.read_csv(MASTER_PATH)
+            # Ensure required columns exist
+            for col in ["referred_person", "referral_source", "month"]:
+                if col not in df.columns:
+                    df[col] = pd.Series(dtype="object")
+            # Optional column for rollback
+            if "batch_id" not in df.columns:
+                df["batch_id"] = pd.NA
+            # Coerce month to YYYY-MM strings
+            df["month"] = df["month"].astype(str).str.slice(0, 7)
+            return df[["referred_person", "referral_source", "month", "batch_id"]]
         except Exception:
-            return pd.DataFrame(columns=["referred_person", "referral_source", "month"])
-    return pd.DataFrame(columns=["referred_person", "referral_source", "month"])
+            pass
+    # Empty master
+    return pd.DataFrame(columns=["referred_person", "referral_source", "month", "batch_id"])
 
 def save_master(df):
-    df.to_csv(MASTER_PATH, index=False)
+    # Save a stable column order
+    cols = ["referred_person", "referral_source", "month", "batch_id"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.NA
+    df[cols].to_csv(MASTER_PATH, index=False)
 
 def normalize_month(val):
     """Return YYYY-MM string for month input that may be a date, string, or pandas Timestamp."""
@@ -72,10 +88,32 @@ with st.sidebar:
     st.subheader("Master Data")
     master = load_master()
     st.caption(f"Records in master: **{len(master):,}**")
-    if st.button("🔄 Clear master data"):
-        save_master(pd.DataFrame(columns=["referred_person", "referral_source", "month"]))
+
+    # Undo (delete) a past upload by batch_id
+    batches = master.dropna(subset=["batch_id"])
+    if len(batches):
+        st.markdown("**Undo a past upload (batch):**")
+        agg = (batches
+               .groupby("batch_id")
+               .agg(rows=("referred_person", "size"),
+                    months=("month", lambda s: ", ".join(sorted(pd.Series(s).dropna().unique())[:6])))
+               .sort_index(ascending=False))
+        batch_labels = [f"{idx} • {row.rows} rows • {row.months}" for idx, row in agg.iterrows()]
+        batch_ids = list(agg.index)
+        sel_label = st.selectbox("Select batch to delete", batch_labels, key="sel_batch") if len(batch_labels) else None
+        if sel_label:
+            sel_id = batch_ids[batch_labels.index(sel_label)]
+            if st.button("🗑 Delete selected batch", key="delete_batch_btn"):
+                master = master[~(master["batch_id"] == sel_id)]
+                save_master(master)
+                st.success(f"Deleted batch {sel_id}.")
+                st.stop()
+
+    # Clear all (nuclear option)
+    if st.button("🧹 Clear ALL master data"):
+        save_master(pd.DataFrame(columns=["referred_person", "referral_source", "month", "batch_id"]))
         st.success("Master cleared.")
-        master = load_master()
+        st.stop()
 
     # Show logo in sidebar
     st.image("assets/firm_logo.png", use_column_width=True)
@@ -116,8 +154,7 @@ if uploaded is not None:
     # --- Month selection (Month + Year dropdowns) ---
     if month_mode == "Pick a month for all rows":
         current = date.today()
-        # You can adjust the year range to your needs
-        year_options = list(range(current.year + 1, current.year - 6, -1))  # e.g., [2026, 2025, 2024, ...]
+        year_options = list(range(current.year + 1, current.year - 6, -1))  # e.g., [2026..current-5]
         col_m, col_y = st.columns(2)
         month_num = col_m.selectbox(
             "Month",
@@ -147,15 +184,20 @@ if uploaded is not None:
         else:
             df_new["month"] = data[month_col].apply(normalize_month)
 
+        # Drop blanks / bad
         before = len(df_new)
         df_new = df_new.dropna(subset=["referral_source", "month"])
         df_new = df_new[df_new["referral_source"] != ""]
         after = len(df_new)
 
+        # Tag this upload as a batch for rollback
+        batch_id = datetime.now().strftime("%Y%m%d%H%M%S")
+        df_new["batch_id"] = batch_id
+
         master = load_master()
         master = pd.concat([master, df_new], ignore_index=True)
         save_master(master)
-        st.success(f"Appended {after} rows (dropped {before - after} incomplete rows).")
+        st.success(f"Appended {after} rows (dropped {before - after} incomplete rows). Batch ID: {batch_id}")
 
 # ---------- Explore & Download ----------
 st.header("2) Explore & Download Results")
@@ -257,17 +299,84 @@ else:
         with col2:
             st.download_button(
                 "⬇️ Download Master (CSV)",
-                data=master_year.to_csv(index=False).encode("utf-8"),
+                data=master_year.drop(columns=["batch_id"], errors="ignore").to_csv(index=False).encode("utf-8"),
                 file_name=f"referrals_master_{year_choice}{'_YTD' if use_ytd else ''}.csv",
                 mime="text/csv"
             )
         with col3:
-            excel_bytes = to_excel_bytes(pivot_view, master_year, avg_per_source_sorted)
+            excel_bytes = to_excel_bytes(
+                pivot_view,
+                master_year.drop(columns=["batch_id"], errors="ignore"),
+                avg_per_source_sorted
+            )
             st.download_button(
                 "⬇️ Download Excel (Pivot+Master+Averages)",
                 data=excel_bytes,
                 file_name=f"referrals_report_{year_choice}{'_YTD' if use_ytd else ''}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+# ---------- Row editor (surgical deletes) ----------
+st.header("3) Edit / Delete Specific Rows")
+master = load_master()
+
+if len(master) == 0:
+    st.info("No data yet.")
+else:
+    # Filters
+    col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+    with col_f1:
+        months_all = sorted([m for m in master["month"].dropna().unique()])
+        month_filter = st.selectbox("Month", ["(All)"] + months_all, index=0)
+    with col_f2:
+        sources_all = sorted([s for s in master["referral_source"].dropna().unique()])
+        source_filter = st.multiselect("Referral source(s)", sources_all, default=[])
+    with col_f3:
+        person_query = st.text_input("Filter by referred person (contains)", value="")
+
+    # Build mask
+    mask = pd.Series(True, index=master.index)
+    if month_filter != "(All)":
+        mask &= master["month"] == month_filter
+    if source_filter:
+        mask &= master["referral_source"].isin(source_filter)
+    if person_query.strip():
+        mask &= master["referred_person"].astype(str).str.contains(person_query.strip(), case=False, na=False)
+
+    edit_df = master.loc[mask].copy()
+    if edit_df.empty:
+        st.info("No rows match your filters.")
+    else:
+        # Use index as hidden row-id and add a checkbox column
+        edit_df = edit_df.assign(**{"Delete?": False})
+        edited = st.data_editor(
+            edit_df,
+            use_container_width=True,
+            num_rows="fixed",
+            hide_index=True,
+            column_config={
+                "referred_person": st.column_config.TextColumn("Referred person", disabled=True),
+                "referral_source": st.column_config.TextColumn("Referral source", disabled=True),
+                "month": st.column_config.TextColumn("Month (YYYY-MM)", disabled=True),
+                "batch_id": st.column_config.TextColumn("Batch ID", disabled=True),
+                "Delete?": st.column_config.CheckboxColumn("Delete?")
+            },
+            key="row_editor"
+        )
+
+        col_d1, col_d2 = st.columns([1, 4])
+        with col_d1:
+            if st.button("🗑 Delete checked rows", type="secondary"):
+                to_delete_idx = edited.index[edited["Delete?"] == True]
+                if len(to_delete_idx) == 0:
+                    st.warning("No rows were checked for deletion.")
+                else:
+                    # Drop by original index
+                    master2 = master.drop(index=to_delete_idx, errors="ignore")
+                    save_master(master2)
+                    st.success(f"Deleted {len(to_delete_idx)} row(s).")
+                    st.stop()
+        with col_d2:
+            st.caption("Tip: narrow the list using filters, tick **Delete?**, then click the button.")
 
 st.caption("Tip: Deploy this on Streamlit Community Cloud to share with your team and update monthly.")
