@@ -3,11 +3,11 @@ credentials:
     kelly:
       name: Kelly Graham
       email: kgraham@pjilaw.com
-      password: "$2b$12$REPLACE_WITH_YOUR_BCRYPT_HASH"
+      password: "$2b$12$yUaFcwT4hfHqpC7jL22j0ODcjNNL/QzKk.aREH38B79.U7AmTbXqq"
 
 cookie:
   name: referrals_app_auth
-  key: "$2b$12$yUaFcwT4hfHqpC7jL22j0ODcjNNL/QzKk.aREH38B79.U7AmTbXqq"
+  key: "JOxrdDOKWN0y63OVm817ECvgYNMPJwcN"
   expiry_days: 30
 
 preauthorized:
