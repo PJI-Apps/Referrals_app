@@ -103,30 +103,30 @@ if uploaded is not None:
 
 import calendar
 
-    if month_mode == "Pick a month for all rows":
-        # Month/year dropdowns instead of full calendar
-        current = date.today()
-        year_options = list(range(current.year - 5, current.year + 2))
+if month_mode == "Pick a month for all rows":
+    # Month/year dropdowns instead of full calendar
+    current = date.today()
+    year_options = list(range(current.year - 5, current.year + 2))
 
-        col_m, col_y = st.columns(2)
-        month_num = col_m.selectbox(
-            "Month",
-            list(range(1, 13)),
-            index=current.month - 1,
-            format_func=lambda m: calendar.month_name[m]
-        )
-        year_num = col_y.selectbox(
-            "Year",
-            year_options,
-            index=year_options.index(current.year)
-        )
+    col_m, col_y = st.columns(2)
+    month_num = col_m.selectbox(
+        "Month",
+        list(range(1, 13)),
+        index=current.month - 1,
+        format_func=lambda m: calendar.month_name[m]
+    )
+    year_num = col_y.selectbox(
+        "Year",
+        year_options,
+        index=year_options.index(current.year)
+    )
 
-        chosen_month = f"{year_num}-{month_num:02d}"
+    chosen_month = f"{year_num}-{month_num:02d}"
 
-    else:
-        month_col = st.selectbox("Column containing the month/date", cols, index=2 if len(cols) > 2 else 0)
-        tmp = data[month_col].head(10).apply(normalize_month)
-        st.caption("Conversion preview (first 10 rows): " + ", ".join([str(x) for x in tmp.tolist()]))
+else:
+    month_col = st.selectbox("Column containing the month/date", cols, index=2 if len(cols) > 2 else 0)
+    tmp = data[month_col].head(10).apply(normalize_month)
+    st.caption("Conversion preview (first 10 rows): " + ", ".join([str(x) for x in tmp.tolist()]))
 
 
     if st.button("➕ Append to Master"):
