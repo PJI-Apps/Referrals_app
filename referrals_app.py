@@ -48,7 +48,6 @@ try:
     fields = {"Form name": "Login", "Username": "Username", "Password": "Password"}
     name, auth_status, username = authenticator.login(fields=fields, location="main")
 
-
     if auth_status is False:
         st.error("Username/password is incorrect")
         st.stop()
@@ -421,19 +420,27 @@ else:
         col_d1, col_d2 = st.columns([1, 4])
         with col_d1:
             if st.button("🗑 Delete checked rows", type="secondary"):
+                # Defensive guard
+                if "Delete?" not in edited.columns:
+                    st.error("Internal error: 'Delete?' column not found.")
+                    st.stop()
+
                 # Build a per-row boolean mask; fill NAs as False just in case
                 delete_mask = edited["Delete?"].fillna(False).astype(bool)
 
                 # Get the original row indices corresponding to the checked rows
                 to_delete_idx = edited.index[delete_mask]
 
-            if len(to_delete_idx) == 0:
-                st.warning("No rows were checked for deletion.")
-            else:
-                master2 = master.drop(index=to_delete_idx, errors="ignore")
-                save_master(master2)
-                st.success(f"Deleted {len(to_delete_idx)} row(s).")
-                st.stop()
+                if len(to_delete_idx) == 0:
+                    st.warning("No rows were checked for deletion.")
+                else:
+                    master2 = master.drop(index=to_delete_idx, errors="ignore")
+                    save_master(master2)
+                    st.success(f"Deleted {len(to_delete_idx)} row(s).")
+                    try:
+                        st.rerun()
+                    except Exception:
+                        st.stop()
 
         with col_d2:
             st.caption("Tip: narrow the list using filters, tick **Delete?**, then click the button.")
