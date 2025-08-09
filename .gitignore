@@ -1,0 +1,8 @@
+# Local data files (never commit these)
+data/
+*.parquet
+*.csv
+*.xlsx
+.DS_Store
+.venv/
+.env
