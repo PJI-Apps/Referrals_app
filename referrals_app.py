@@ -1,10 +1,11 @@
 import io
 import os
+import calendar
 import pandas as pd
 import streamlit as st
-import calendar
 from datetime import date, datetime
 
+# ---------- Helpers for year/month selection ----------
 def list_years(master_df):
     if master_df.empty:
         return []
@@ -18,6 +19,7 @@ def months_in_year(year, through_month=None):
         ym.append(f"{year}-{mm:02d}")
     return ym
 
+# ---------- Page ----------
 st.set_page_config(
     page_title="Referral Sources Tracker",
     page_icon="assets/firm_logo.png",  # favicon/tab icon
@@ -25,18 +27,17 @@ st.set_page_config(
 )
 
 st.title("📈 Referral Sources Tracker")
-
 st.markdown("""
 Upload your monthly referral export, map the columns, and click **Append to Master**.  
 The app will build a **Referral Source × Month** table. New sources automatically appear with **0** in prior months.
 """)
 
-# Storage paths
+# ---------- Storage paths ----------
 DATA_DIR = "data"
 MASTER_PATH = os.path.join(DATA_DIR, "referrals_master.csv")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# --- Utilities ---
+# ---------- Utilities ----------
 def load_master():
     if os.path.exists(MASTER_PATH):
         try:
@@ -61,11 +62,12 @@ def normalize_month(val):
         except Exception:
             pass
     try:
-        return pd.to_datetime(s, errors="coerce").strftime("%Y-%m")
+        parsed = pd.to_datetime(s, errors="coerce")
+        return parsed.strftime("%Y-%m") if not pd.isna(parsed) else None
     except Exception:
         return None
 
-# --- Sidebar: Master data controls ---
+# ---------- Sidebar ----------
 with st.sidebar:
     st.subheader("Master Data")
     master = load_master()
@@ -75,58 +77,66 @@ with st.sidebar:
         st.success("Master cleared.")
         master = load_master()
 
-st.sidebar.image("assets/firm_logo.png", use_column_width=True)
-st.sidebar.markdown("---")
+    # Show logo in sidebar
+    st.image("assets/firm_logo.png", use_column_width=True)
+    st.markdown("---")
 
-# --- File upload section ---
+# ---------- Upload section ----------
 st.header("1) Upload Monthly List")
 uploaded = st.file_uploader("Drop an Excel/CSV file", type=["xlsx", "xls", "csv"])
 
 if uploaded is not None:
+    # Read file
     if uploaded.name.lower().endswith(".csv"):
         candidates = {"CSV": pd.read_csv(uploaded)}
     else:
         xl = pd.ExcelFile(uploaded)
         candidates = {s: xl.parse(s) for s in xl.sheet_names}
 
+    # Choose sheet
     sheet = st.selectbox("Choose a sheet", list(candidates.keys()))
     data = candidates[sheet].copy()
 
     st.write("Preview:")
     st.dataframe(data.head(20), use_container_width=True)
 
+    # Column mapping
     st.subheader("Map your columns")
     cols = list(data.columns)
     ref_person_col = st.selectbox("Column with **Referred Person Name**", cols, index=0 if cols else None)
     source_col = st.selectbox("Column with **Referral Source**", cols, index=1 if len(cols) > 1 else 0)
-    month_mode = st.radio("How do you want to set the **Month** for these rows?", ["Pick a month for all rows", "Use a column from the file"], horizontal=True)
 
-if month_mode == "Pick a month for all rows":
-    # Month/year dropdowns instead of full calendar
-    current = date.today()
-    year_options = list(range(current.year - 5, current.year + 2))
-
-    col_m, col_y = st.columns(2)
-    month_num = col_m.selectbox(
-        "Month",
-        list(range(1, 13)),
-        index=current.month - 1,
-        format_func=lambda m: calendar.month_name[m]
-    )
-    year_num = col_y.selectbox(
-        "Year",
-        year_options,
-        index=year_options.index(current.year)
+    # How to set month
+    month_mode = st.radio(
+        "How do you want to set the **Month** for these rows?",
+        ["Pick a month for all rows", "Use a column from the file"],
+        horizontal=True
     )
 
-    chosen_month = f"{year_num}-{month_num:02d}"
+    # --- Month selection (Month + Year dropdowns) ---
+    if month_mode == "Pick a month for all rows":
+        current = date.today()
+        # You can adjust the year range to your needs
+        year_options = list(range(current.year + 1, current.year - 6, -1))  # e.g., [2026, 2025, 2024, ...]
+        col_m, col_y = st.columns(2)
+        month_num = col_m.selectbox(
+            "Month",
+            list(range(1, 13)),
+            index=current.month - 1,
+            format_func=lambda m: calendar.month_name[m]
+        )
+        year_num = col_y.selectbox(
+            "Year",
+            year_options,
+            index=year_options.index(current.year)
+        )
+        chosen_month = f"{year_num}-{month_num:02d}"
+    else:
+        month_col = st.selectbox("Column containing the month/date", cols, index=2 if len(cols) > 2 else 0)
+        tmp = data[month_col].head(10).apply(normalize_month)
+        st.caption("Conversion preview (first 10 rows): " + ", ".join([str(x) for x in tmp.tolist()]))
 
-else:
-    month_col = st.selectbox("Column containing the month/date", cols, index=2 if len(cols) > 2 else 0)
-    tmp = data[month_col].head(10).apply(normalize_month)
-    st.caption("Conversion preview (first 10 rows): " + ", ".join([str(x) for x in tmp.tolist()]))
-
-
+    # Append button
     if st.button("➕ Append to Master"):
         df_new = pd.DataFrame({
             "referred_person": data[ref_person_col].astype(str).str.strip(),
@@ -147,14 +157,14 @@ else:
         save_master(master)
         st.success(f"Appended {after} rows (dropped {before - after} incomplete rows).")
 
+# ---------- Explore & Download ----------
 st.header("2) Explore & Download Results")
 master = load_master()
 
-# If no data at all
 if len(master) == 0:
     st.info("Upload at least one monthly file to see results.")
 else:
-    # --- Year filter + YTD control (YTD = up to latest month WITH DATA) ---
+    # Year filter + YTD (YTD ends at latest month with DATA, not today)
     years = list_years(master)
     latest_year = years[-1] if years else None
 
@@ -164,11 +174,11 @@ else:
     with col_y2:
         use_ytd = st.checkbox("Use Year-to-Date (ends at latest month with data)", value=True)
 
-    # Build a filtered copy for the selected year
+    # Filter to selected year
     year_mask = master["month"].str.startswith(year_choice)
     master_year = master[year_mask].copy()
 
-    # Determine YTD cutoff as the latest month that actually has data for the selected year
+    # Determine YTD cutoff based on data
     cutoff_month = None
     if use_ytd:
         months_for_year = (
@@ -176,13 +186,12 @@ else:
             .str[-2:].astype(int).sort_values()
         )
         cutoff_month = int(months_for_year.iloc[-1]) if len(months_for_year) else 12
-        # Apply cutoff
         master_year = master_year[master_year["month"].str[-2:].astype(int) <= cutoff_month]
 
     if master_year.empty:
         st.info("No data for the selected year/period yet.")
     else:
-        # Build pivot for selected year/period
+        # Build pivot for the selected period
         pivot = (
             master_year
             .groupby(["referral_source", "month"], dropna=False)
@@ -194,14 +203,14 @@ else:
             .sort_index()
         )
 
-        # Ensure columns cover every month in the visible period (zero-fill missing months)
+        # Ensure columns cover all months in the period (zero-fill)
         full_months = months_in_year(year_choice, cutoff_month)
         for m in full_months:
             if m not in pivot.columns:
                 pivot[m] = 0
-        pivot = pivot[full_months]  # order Jan..(cutoff)
+        pivot = pivot[full_months]  # Jan..(cutoff)
 
-        # Sorting
+        # Sorting controls
         st.subheader("Sorting")
         months = ["(Alphabetical)"] + list(pivot.columns)
         sort_choice = st.selectbox("Sort referral sources by:", months, index=0)
@@ -222,7 +231,7 @@ else:
         st.write("**Monthly totals across all sources:**")
         st.dataframe(totals, use_container_width=True)
 
-        # NEW: Average per referral source across the shown months (includes zeros)
+        # Average per referral source across the shown months (includes zeros)
         st.subheader(f"Average referrals per source — {title_suffix}")
         avg_per_source = pivot[full_months].mean(axis=1).to_frame(name="avg_referrals_per_month")
         avg_per_source_sorted = avg_per_source.sort_values("avg_referrals_per_month", ascending=False)
