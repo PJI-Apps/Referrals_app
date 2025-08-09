@@ -5,7 +5,61 @@ import pandas as pd
 import streamlit as st
 from datetime import date, datetime
 
-# ---------- Helpers for year/month selection ----------
+# =========================
+# 🔐 AUTHENTICATION (Gate)
+# =========================
+# Requires:
+# [credentials]
+#   [credentials.usernames.kelly]
+#   email = "kgraham@pjilaw.com"
+#   name = "Kelly Graham"
+#   password = "$2b$12$...."  # bcrypt hash
+#
+# [cookie]
+# expiry_days = 30
+# key = "LONG_RANDOM_STRING"
+# name = "referrals_app_cookie"
+#
+# [preauthorized]
+# emails = ["kgraham@pjilaw.com"]
+
+st.set_page_config(page_title="Referral Sources Tracker", page_icon="assets/firm_logo.png", layout="wide")
+
+try:
+    import streamlit_authenticator as stauth
+
+    credentials = st.secrets["credentials"]
+    cookie = st.secrets["cookie"]
+    preauth = st.secrets.get("preauthorized", {"emails": []})
+
+    authenticator = stauth.Authenticate(
+        credentials,
+        cookie["name"],
+        cookie["key"],
+        cookie["expiry_days"],
+        preauth,
+    )
+
+    name, auth_status, username = authenticator.login("Login", "main")
+
+    if auth_status is False:
+        st.error("Username/password is incorrect")
+        st.stop()
+    elif auth_status is None:
+        st.warning("Please enter your username and password")
+        st.stop()
+    else:
+        with st.sidebar:
+            authenticator.logout("Logout", "sidebar")
+            st.caption(f"Signed in as **{name}**")
+except Exception as e:
+    st.error("Authentication is not configured correctly. Check your app Secrets and requirements.")
+    st.exception(e)
+    st.stop()
+
+# =========================
+# App helpers / utilities
+# =========================
 def list_years(master_df):
     if master_df.empty:
         return []
@@ -18,13 +72,6 @@ def months_in_year(year, through_month=None):
     for mm in range(1, last + 1):
         ym.append(f"{year}-{mm:02d}")
     return ym
-
-# ---------- Page ----------
-st.set_page_config(
-    page_title="Referral Sources Tracker",
-    page_icon="assets/firm_logo.png",  # favicon/tab icon
-    layout="wide",
-)
 
 st.title("📈 Referral Sources Tracker")
 st.markdown("""
@@ -96,8 +143,8 @@ with st.sidebar:
         agg = (batches
                .groupby("batch_id")
                .agg(rows=("referred_person", "size"),
-                    months=("month", lambda s: ", ".join(sorted(pd.Series(s).dropna().unique())[:6])))
-               .sort_index(ascending=False))
+                    months=("month", lambda s: ", ".join(sorted(pd.Series(s).dropna().unique())[:6]))))
+        agg = agg.sort_index(ascending=False)
         batch_labels = [f"{idx} • {row.rows} rows • {row.months}" for idx, row in agg.iterrows()]
         batch_ids = list(agg.index)
         sel_label = st.selectbox("Select batch to delete", batch_labels, key="sel_batch") if len(batch_labels) else None
@@ -154,7 +201,7 @@ if uploaded is not None:
     # --- Month selection (Month + Year dropdowns) ---
     if month_mode == "Pick a month for all rows":
         current = date.today()
-        year_options = list(range(current.year + 1, current.year - 6, -1))  # e.g., [2026..current-5]
+        year_options = list(range(current.year + 1, current.year - 6, -1))  # e.g., [next year .. current-5]
         col_m, col_y = st.columns(2)
         month_num = col_m.selectbox(
             "Month",
