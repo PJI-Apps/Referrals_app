@@ -101,12 +101,12 @@ if uploaded is not None:
     month_mode = st.radio("How do you want to set the **Month** for these rows?", ["Pick a month for all rows", "Use a column from the file"], horizontal=True)
 
     if month_mode == "Pick a month for all rows":
-    month_pick = st.date_input(
-        "Pick the month and year for this batch",
-        value=date.today().replace(day=1)
-    )
-    # Force to the first of the month and store as YYYY-MM
-    chosen_month = pd.to_datetime(month_pick).replace(day=1).strftime("%Y-%m")
+        month_pick = st.date_input(
+            "Pick the month and year for this batch",
+            value=date.today().replace(day=1)
+        )
+        # Force to the first of the month and store as YYYY-MM
+        chosen_month = pd.to_datetime(month_pick).replace(day=1).strftime("%Y-%m")
 
     else:
         month_col = st.selectbox("Column containing the month/date", cols, index=2 if len(cols) > 2 else 0)
