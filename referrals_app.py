@@ -74,7 +74,7 @@ with st.sidebar:
         st.success("Master cleared.")
         master = load_master()
 
-st.sidebar.image("assets/firm_logo.png", use_container_width=True)
+st.sidebar.image("assets/firm_logo.png", use_column_width=True)
 st.sidebar.markdown("---")
 
 # --- File upload section ---
